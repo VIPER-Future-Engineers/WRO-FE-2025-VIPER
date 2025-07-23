@@ -3,6 +3,7 @@ import board
 import busio
 import RPi.GPIO as GPIO
 import adafruit_vl53l0x
+import I2C
 
 # Copyright (c) 2025 Jadon
 # Unauthorized use is prohibited.

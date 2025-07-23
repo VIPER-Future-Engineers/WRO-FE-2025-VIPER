@@ -1,10 +1,10 @@
-import time                                                             # imports the library for time
-import board                                                            # imports the library for I2C (1)
-import busio                                                            # imports the library for I2C (2)
-import adafruit_vl53l0x                                                 # imports the library for TOF Sensors (Time of flight)
-import RPi.GPIO as GPIO                                                 # imports the library for Motors
-from gpiozero import DistanceSensor                                     # imports the library for Ultrasonic sensors
-from pixy2 import Pixy2                                                 # imports the library for Pixy camera
+import time                                                # imports the library for time
+import board                                            # imports the library for I2C (1)
+import busio                                             # imports the library for I2C (2)
+import adafruit_vl53l0x                           # imports the library for TOF ensors (Time of flight)
+import RPi.GPIO as GPIO                        # imports the library for Motors
+from gpiozero import DistanceSensor  # imports the library for Ultrasonic sensors
+from pixy2 import Pixy2                          # imports the library for Pixy camera
 
 # GPIO pin definitions 
 # VL53L0X XSHUT pins - used to power on/off sensors individually
