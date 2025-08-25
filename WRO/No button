@@ -1,0 +1,317 @@
+import time
+import board
+import busio
+import threading
+import collections
+import logging
+
+import adafruit_vl53l0x
+import adafruit_tcs34725
+import RFRobot_I2C_Multiplexer as rf_mux
+import RPi.GPIO as GPIO
+
+# ---------------------------------------------------------------------
+# CONFIGURATION
+# ---------------------------------------------------------------------
+class Config:
+    IN1         = 9
+    IN2         = 11
+    ENA         = 10
+    SERVO_PIN   = 25
+    TCS_LED_PIN = 17
+
+    PWM_MOTOR_FREQ = 1000
+    PWM_SERVO_FREQ = 50
+    PWM_TCS_LED_FREQ = 500
+
+    SENSOR_CHANNELS = {
+        'FR': 1,
+        'FL': 2,
+        'F':  3,
+        'RL': 4,
+        'RR': 5,
+        'TCS': 0,
+    }
+
+    BUDGET_FRONT_US = 20000
+    BUDGET_REAR_US  = 33000
+
+    FRONT_THRESHOLD_CM = 40.0
+    STEER_LEFT_DEG     = 45
+    STEER_RIGHT_DEG    = 135
+    STEER_STRAIGHT_DEG = 90
+
+    COLOR_COUNT_FOR_LAP = 4
+    TOTAL_LAPS          = 3
+
+# ---------------------------------------------------------------------
+# LOGGING
+# ---------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------
+class RollingFilter:
+    def __init__(self, size: int = 3):
+        self._buf = collections.deque(maxlen=size)
+
+    def add(self, sample: float) -> float:
+        self._buf.append(sample)
+        return sum(self._buf) / len(self._buf)
+
+class MotorController:
+    def __init__(self, in1: int, in2: int, pwm_pin: int, freq: int):
+        GPIO.setup(in1, GPIO.OUT)
+        GPIO.setup(in2, GPIO.OUT)
+        self._in1 = in1
+        self._in2 = in2
+        self._pwm = GPIO.PWM(pwm_pin, freq)
+        self._pwm.start(0)
+
+    def forward(self, speed: float) -> None:
+        GPIO.output(self._in1, GPIO.LOW)
+        GPIO.output(self._in2, GPIO.HIGH)
+        self._pwm.ChangeDutyCycle(speed)
+
+    def stop(self) -> None:
+        GPIO.output(self._in1, GPIO.HIGH)
+        GPIO.output(self._in2, GPIO.HIGH)
+        self._pwm.ChangeDutyCycle(0)
+
+class ServoController:
+    def __init__(self, pin: int, freq: int):
+        GPIO.setup(pin, GPIO.OUT)
+        self._pwm = GPIO.PWM(pin, freq)
+        self._pwm.start(7.5)
+
+    def set_angle(self, angle: float) -> None:
+        if 0 <= angle <= 180:
+            duty = 2 + (angle / 18)
+            self._pwm.ChangeDutyCycle(duty)
+        else:
+            logger.warning("Servo angle out of range: %s", angle)
+
+class LEDController:
+    def __init__(self, pin: int, freq: int):
+        GPIO.setup(pin, GPIO.OUT)
+        self._pwm = GPIO.PWM(pin, freq)
+        self._pwm.start(0)
+
+    def set_duty(self, duty: float) -> None:
+        duty = max(0, min(100, duty))
+        self._pwm.ChangeDutyCycle(duty)
+
+    def stop(self) -> None:
+        self._pwm.ChangeDutyCycle(0)
+
+class SensorManager:
+    def __init__(self, mux: rf_mux.I2C_Multiplexer):
+        self._sensors = {}
+        self._filters = {}
+        for name, ch in Config.SENSOR_CHANNELS.items():
+            if name == 'TCS':
+                continue
+            mux.channel_enable(ch)
+            sens = adafruit_vl53l0x.VL53L0X(mux.i2c)
+            budget = (
+                Config.BUDGET_FRONT_US
+                if name.startswith('F')
+                else Config.BUDGET_REAR_US
+            )
+            sens.measurement_timing_budget = budget
+            sens.start_continuous()
+            self._sensors[name] = sens
+            self._filters[name] = RollingFilter(3)
+            mux.channel_disable(ch)
+
+    def range_cm(self, name: str) -> float:
+        ch = Config.SENSOR_CHANNELS[name]
+        mux.channel_enable(ch)
+        mm = self._sensors[name].range
+        mux.channel_disable(ch)
+        avg_mm = self._filters[name].add(mm)
+        return avg_mm / 10.0
+
+class HeartbeatThread:
+    def __init__(self, tcs_led, run_event, interrupt_event, mode_event):
+        self.tcs_led = tcs_led
+        self.run_evt = run_event
+        self.int_evt = interrupt_event
+        self.mode_evt = mode_event
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def _fade_out(self, start: int, strength: float, speed: float) -> None:
+        logger.info("Fading heartbeat…")
+        for duty in [40,100,30,90]:
+            self.tcs_led.set_duty(duty)
+            time.sleep(0.12)
+        for duty in range(70, -1, -10):
+            self.tcs_led.set_duty(duty)
+            time.sleep(0.15)
+        self.tcs_led.set_duty(0)
+        logger.info("Heartbeat and TCS LED off.")
+
+    def _run(self) -> None:
+        logger.info("Heartbeat thread started.")
+        while self.run_evt.is_set() and not self.int_evt.is_set():
+            time.sleep(1)
+        self._fade_out(0, 1.0, 1.0)
+        logger.info("Heartbeat thread exiting.")
+
+# ---------------------------------------------------------------------
+# ROBOT
+# ---------------------------------------------------------------------
+class Robot:
+    def __init__(self) -> None:
+        GPIO.setwarnings(False)
+        GPIO.setmode(GPIO.BCM)
+
+        self.motor   = MotorController(Config.IN1, Config.IN2, Config.ENA, Config.PWM_MOTOR_FREQ)
+        self.servo   = ServoController(Config.SERVO_PIN, Config.PWM_SERVO_FREQ)
+        self.tcs_led = LEDController(Config.TCS_LED_PIN, Config.PWM_TCS_LED_FREQ)
+
+        i2c = busio.I2C(board.SCL, board.SDA)
+        global mux
+        mux = rf_mux.I2C_Multiplexer(i2c, address=0x70)
+
+        self.sensors      = SensorManager(mux)
+        self.color_sensor = adafruit_tcs34725.TCS34725(mux.i2c)
+
+        self.orientation     = None
+        self.lap_count       = 0
+        self.color_seen      = 0
+
+        self.run_event       = threading.Event()
+        self.interrupt_event = threading.Event()
+        self.mode_event      = threading.Event()
+
+        self.heartbeat = HeartbeatThread(
+            self.tcs_led,
+            self.run_event,
+            self.interrupt_event,
+            self.mode_event
+        )
+
+    def wake_sequence(self) -> None:
+        logger.info("Wake: opening eyes…")
+        for d in range(0, 101, 5):
+            self.tcs_led.set_duty(d)
+            time.sleep(0.04)
+        for _ in range(3):
+            self.tcs_led.set_duty(0); time.sleep(0.15)
+            self.tcs_led.set_duty(100); time.sleep(0.15)
+        self.tcs_led.set_duty(0)
+        time.sleep(1)
+
+    def detect_orientation(self) -> None:
+        logger.info("Detecting orientation (blue=CCW, orange=CW)…")
+        while self.orientation is None:
+            r, g, b = self.color_sensor.color_rgb_bytes
+            if b > r and b > g and b > 50:
+                self.orientation = 'CCW'
+            elif r > g and r > b and r > 50:
+                self.orientation = 'CW'
+            else:
+                time.sleep(0.1)
+        logger.info("Orientation set to %s", self.orientation)
+
+    def check_lap(self) -> None:
+        r, g, b = self.color_sensor.color_rgb_bytes
+        match = (
+            (self.orientation == 'CCW' and b > r and b > g) or
+            (self.orientation == 'CW'  and r > g and r > b)
+        )
+        self.color_seen = self.color_seen + 1 if match else 0
+        if self.color_seen >= Config.COLOR_COUNT_FOR_LAP:
+            self.lap_count += 1
+            self.color_seen = 0
+            logger.info("🏁 Lap %d completed!", self.lap_count)
+
+    def start_run(self) -> None:
+        """Begin wake + idle heartbeat + active run."""
+        self.run_event.set()
+        self.interrupt_event.clear()
+        self.mode_event.clear()     # idle
+        self.wake_sequence()
+        self.heartbeat.start()
+        time.sleep(5)               # startup delay
+        self.mode_event.set()       # active
+        logger.info("Autonomous run started")
+
+    def soft_reset(self) -> None:
+        """Clear state, LEDs, and lap counters."""
+        self.run_event.clear()
+        self.interrupt_event.clear()
+        self.mode_event.clear()
+        self.tcs_led.set_duty(0)
+        self.lap_count   = 0
+        self.orientation = None
+        self.color_seen  = 0
+
+    def shutdown(self) -> None:
+        """Stop motors/LEDs and cleanup GPIO."""
+        logger.info("Shutdown initiated.")
+        self.run_event.clear()
+        self.interrupt_event.set()
+        self.motor.stop()
+        self.tcs_led.stop()
+        GPIO.cleanup()
+
+    def main_loop(self) -> None:
+        """Drive, avoid walls, and count laps until complete."""
+        try:
+            self.start_run()
+            self.detect_orientation()
+            while self.lap_count < Config.TOTAL_LAPS:
+                if not self.run_event.is_set():
+                    time.sleep(0.1)
+                    continue
+
+                self.check_lap()
+
+                front = self.sensors.range_cm('F')
+                if front < Config.FRONT_THRESHOLD_CM:
+                    fl = self.sensors.range_cm('FL')
+                    fr = self.sensors.range_cm('FR')
+                    steer = (
+                        Config.STEER_LEFT_DEG
+                        if (fl > fr) == (self.orientation == 'CCW')
+                        else Config.STEER_RIGHT_DEG
+                    )
+                else:
+                    rl = self.sensors.range_cm('RL')
+                    rr = self.sensors.range_cm('RR')
+                    if self.orientation == 'CCW':
+                        steer = (
+                            Config.STEER_LEFT_DEG if rl > rr
+                            else Config.STEER_RIGHT_DEG
+                        )
+                    else:
+                        steer = (
+                            Config.STEER_RIGHT_DEG if rr > rl
+                            else Config.STEER_LEFT_DEG
+                        )
+
+                self.servo.set_angle(steer)
+                self.motor.forward(50)
+                time.sleep(0.05)
+
+        except Exception:
+            logger.exception("Unhandled exception in main_loop")
+        finally:
+            self.shutdown()
+
+def main() -> None:
+    robot = Robot()
+    robot.main_loop()
+
+if __name__ == "__main__":
+    main()
