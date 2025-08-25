@@ -1,17 +1,16 @@
 # Team Viper – WRO 2025
 
-We’re ***Team Viper***, a first-year WRO team learning and building as we go. Our name comes from the Python code that powers our robot—and the viper snake, known for its precision and adaptability. We try to reflect that in our design: thoughtful, responsive, and always improving. Our robot features a modular split chassis, custom enclosures, and symbolic touches that make it feel personal. Each of us brings different strengths, from coding and mechanical layout to documentation and expressive feedback. We’re still figuring things out, but we’re proud of what we’ve built—and excited to keep learning.
+We’re ***Team Viper***, a first-year WRO team learning and building as we go. Our name comes from the Python code that powers our robot—and the viper snake, known for its precision and adaptability. We try to reflect that in our design: thoughtful, responsive and always improving. Our robot features a modular split chassis design, custom enclosure, and symbolic touches that make it feel personal. Each of us brings different strengths, from coding and mechanical layout to documentation and expressive feedback. We’re still figuring things out, but we’re proud of what we’ve built—and excited to learn more.
 
 ---
 
 ## Power System
 
-Our robot uses a **dual power supply system** to separate high-current motor control from low-voltage logic and sensing:
+Our robot uses a **3 cell barrery pack** to supply power to the robot, split by a buck converter for the different voltage requirements:
 
-- A **battery pack** powers the DC motor and motor controller, ensuring consistent torque and responsiveness.
-- A **USB power bank** supplies the Raspberry Pi, which acts as the central processing unit.
+- A **battery pack** powers the DC motor, **L298N** motor controller and the **MG996R servo motor** for steering.
+- From the battery pack a buck converter steps  down the voltage, then supplies the Raspberry Pi, which acts as the central processing unit.
 - The Raspberry Pi then powers:
-  - An **MG996R servo motor** for steering
   - A **time-of-flight sensor array** via an I²C multiplexer
   - A **TCS34725 color sensor** for surface detection
 
@@ -47,18 +46,18 @@ For obstacle management, we use a **Raspberry Pi Camera Module 3**, mounted at t
 
 ## Symbolic and Expressive Design
 
-We’ve added symbolic elements to our robot, including custom plaques and expressive LED feedback, to reflect our team’s identity and design philosophy. These touches help us blend technical clarity with creative expression—something we value deeply as a team.
+We’ve added symbolic elements to our robot, including custom plaques and expressive LED feedback, to reflect our team’s identity and design philosophy. These touches help us blend technical clarity with creative expression. Something we value deeply as a team.
 
 ---
 
-Thanks for checking out our robot! We’re excited to keep learning, iterating, and improving as we grow through our first year in WRO.
+Thanks for checking out our robot! We’re excited to keep learning, iterating, and improving as we grow through our first year in Future Engineers.
 
 PS. 
 Special thanks to the following:
 
  - **Sudo apt install win -y** for sharing the design for the original VL53L0X mounts
- - Our Tech Educator; **MR. Danie Olivier** for printing our parts
+ - Our Tech Educator; **MR. Danie Olivier** for printing our part mounts
  - **Tony Williams** for supplying some of the parts
  - **Johan Benadie** for supplying us with a template design and teaching us how the robot works
  - **Jarret Williams** for helping us and guiding us in the building of our project
- - **MR G.Steele** for a voice of reason and navigating the *Linux* Distribution
+ - **MR G.Steele** for a voice of reason, helping us navigate the *Linux* Distribution and giving us the opportunity to part-take in this competition
