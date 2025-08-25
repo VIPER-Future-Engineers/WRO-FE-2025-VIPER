@@ -53,4 +53,12 @@ We’ve added symbolic elements to our robot, including custom plaques and expre
 
 Thanks for checking out our robot! We’re excited to keep learning, iterating, and improving as we grow through our first year in WRO.
 
-PS. Special thanks to *sudo apt install win -y* for sharing the design for the original VL53L0X mounts
+PS. 
+Special thanks to the following:
+
+ - **Sudo apt install win -y** for sharing the design for the original VL53L0X mounts
+ - Our Tech Educator; **MR. Danie Olivier** for printing our parts
+ - **Tony Williams** for supplying some of the parts
+ - **Johan Benadie** for supplying us with a template design and teaching us how the robot works
+ - **Jarret Williams** for helping us and guiding us in the building of our project
+ - **MR G.Steele** for a voice of reason and navigating the *Linux* Distribution
