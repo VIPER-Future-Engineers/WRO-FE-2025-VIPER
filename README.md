@@ -60,4 +60,4 @@ Special thanks to the following:
  - **Tony Williams** for supplying some of the parts
  - **Johan Benadie** for supplying us with a template design and teaching us how the robot works
  - **Jarret Williams** for helping us and guiding us in the building of our project
- - **MR G.Steele** for a voice of reason and navigating the *Linux* Distribution
+ - **MR G.Steele** for a voice of reason, helping us navigate the *Linux* Distribution and giving us the opportunity to part-take in this competition
