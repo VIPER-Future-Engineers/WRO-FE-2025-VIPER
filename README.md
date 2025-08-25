@@ -52,3 +52,5 @@ We’ve added symbolic elements to our robot, including custom plaques and expre
 ---
 
 Thanks for checking out our robot! We’re excited to keep learning, iterating, and improving as we grow through our first year in WRO.
+
+PS. Special thanks to sudo apt install win -y for sharing the design for the original VL53L0X mounts
