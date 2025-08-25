@@ -57,7 +57,7 @@ PS.
 Special thanks to the following:
 
  - **Sudo apt install win -y** for sharing the design for the original VL53L0X mounts
- - Our Tech Educator; **MR. Danie Olivier** for printing our parts
+ - Our Tech Educator; **MR. Danie Olivier** for printing our part mounts
  - **Tony Williams** for supplying some of the parts
  - **Johan Benadie** for supplying us with a template design and teaching us how the robot works
  - **Jarret Williams** for helping us and guiding us in the building of our project
