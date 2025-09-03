@@ -155,4 +155,3 @@ finally:
     button_led.stop()
     tcs_led.stop()
     GPIO.cleanup()
-
