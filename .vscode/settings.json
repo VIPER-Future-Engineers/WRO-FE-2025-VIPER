@@ -1,7 +1,16 @@
 {
+<<<<<<< HEAD
+    "git.ignoreLimitWarning": true,
     "workbench.colorCustomizations": {
         "terminal.background": "#00000000",
         "minimap.background": "#111111FF",
         "scrollbar.shadow": "#111111FF"
     }
+=======
+    "workbench.colorCustomizations": {
+        "terminal.background": "#00000000",
+        "minimap.background": "#111111FF",
+        "scrollbar.shadow": "#111111FF"
+    }
+>>>>>>> ed63e3da644fa89f8cfbe8c4b58c4d9ba7c5fad2
 }
