@@ -10,7 +10,7 @@ BUTTON_LED_PIN = 27     # AL2 Halo Switch LED
 TCS_LED_PIN = 17       # TCS34725 LED
 
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(C_PIN, GPIO.OUT)
+GPIO.setup(C_PIN, GPIO.OUT)>
 GPIO.setup(NC_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(NO_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(BUTTON_LED_PIN, GPIO.OUT)

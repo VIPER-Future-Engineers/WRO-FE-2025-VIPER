@@ -18,7 +18,7 @@ class Config:
     IN2            = 11
     ENA            = 10
     SERVO_PIN      = 25
-    BUTTON_PIN     = 23   # Not used for stop
+    BUTTON_PIN     = 23
     BUTTON_LED_PIN = 27
     TCS_LED_PIN    = 17
 
@@ -30,9 +30,9 @@ class Config:
     SENSOR_CHANNELS = {
         'FR': 1,
         'FL': 2,
-        'F':  3,
+        'RR':  3,
         'RL': 4,
-        'RR': 5,
+        'F': 5,
         'TCS': 0,
     }
 
@@ -43,7 +43,7 @@ class Config:
 
     # Fully adjustable steering
     STEER_MIN_DEG = 30
-    STEER_MAX_DEG = 150
+    STEER_MAX_DEG = 140
 
     COLOR_COUNT_FOR_LAP = 4
     TOTAL_LAPS          = 3
@@ -212,7 +212,7 @@ class Robot:
         self._color_filter = RollingFilter(3)
 
         self.orientation = None
-        self.lap_count = 0
+        self.lap_count = 0``
         self.color_seen = 0
 
         self.heartbeat = HeartbeatThread(self.button_led, self.tcs_led)
