@@ -6,7 +6,7 @@ import threading
 C_PIN = 22
 NC_PIN = 24
 NO_PIN = 23
-BUTTON_LED_PIN = 27     # AL2 Halo Switch LED
+BUTTON_LED_PIN = 27     # AL2 Halso Switch LED
 TCS_LED_PIN = 17       # TCS34725 LED
 
 GPIO.setmode(GPIO.BCM)

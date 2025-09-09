@@ -1,38 +1,44 @@
 import time
-import board
-import busio
 import threading
 import collections
 import logging
+import multiprocessing
 
+import board
+import busio
 import adafruit_vl53l0x
 import adafruit_tcs34725
-import RFRobot_I2C_Multiplexer as rf_mux
 import RPi.GPIO as GPIO
+
+# Data/processing libs
+import pandas as pd
+import numpy as np
+import scipy
+from gpiozero import PWMLED, Button
 
 # ----------------------------------------------------------------------------- 
 # CONFIGURATION
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------- 
 class Config:
     IN1            = 9
-    IN2            = 11
+    IN2            = 11S
     ENA            = 10
     SERVO_PIN      = 25
-    BUTTON_PIN     = 23   # Not used for stop
+    BUTTON_PIN     = 23
+    C_PIN          = 22
+    NC_PIN         = 24
     BUTTON_LED_PIN = 27
     TCS_LED_PIN    = 17
 
     PWM_MOTOR_FREQ      = 1000
     PWM_SERVO_FREQ      = 50
-    PWM_BUTTON_LED_FREQ = 500
-    PWM_TCS_LED_FREQ    = 500
 
     SENSOR_CHANNELS = {
         'FR': 1,
         'FL': 2,
-        'F':  3,
+        'RR': 3,
         'RL': 4,
-        'RR': 5,
+        'F':  5,
         'TCS': 0,
     }
 
@@ -40,35 +46,53 @@ class Config:
     BUDGET_REAR_US  = 33000
 
     FRONT_THRESHOLD_CM = 40.0
-
-    # Fully adjustable steering
+    SIDE_THRESHOLD_CM  = 25.0
     STEER_MIN_DEG = 30
-    STEER_MAX_DEG = 150
+    STEER_MAX_DEG = 140
 
     COLOR_COUNT_FOR_LAP = 4
-    TOTAL_LAPS          = 3
+    TOTAL_LAPS = 3
 
 # ----------------------------------------------------------------------------- 
 # LOGGING
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------- 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------------- 
-# HELPER CLASSES
-# -----------------------------------------------------------------------------
+# TCA9548A MULTIPLEXER
+# ----------------------------------------------------------------------------- 
+class TCA9548A:
+    def __init__(self, i2c, address=0x70):
+        self.i2c = i2c
+        self.address = address
+        self.disable_all()
+
+    def select_channel(self, channel: int):
+        if 0 <= channel <= 7:
+            self.i2c.writeto(self.address, bytes([1 << channel]))
+        else:
+            raise ValueError("Channel must be 0–7")
+
+    def disable_all(self):
+        self.i2c.writeto(self.address, bytes([0x00]))
+
+# ----------------------------------------------------------------------------- 
+# HELPERS
+# ----------------------------------------------------------------------------- 
 class RollingFilter:
+    """Simple rolling average filter."""
     def __init__(self, size: int = 3):
         self._buf = collections.deque(maxlen=size)
-
     def add(self, sample: float) -> float:
         self._buf.append(sample)
-        return sum(self._buf) / len(self._buf)
+        return float(np.mean(self._buf))
 
 class MotorController:
     def __init__(self, in1, in2, pwm_pin, freq):
         GPIO.setup(in1, GPIO.OUT)
         GPIO.setup(in2, GPIO.OUT)
+        GPIO.setup(pwm_pin, GPIO.OUT)
         self._in1 = in1
         self._in2 = in2
         self._pwm = GPIO.PWM(pwm_pin, freq)
@@ -101,28 +125,15 @@ class ServoController:
         angle = max(self._min, min(self._max, angle))
         if self._last_angle == angle:
             return
-        duty = 2 + (angle / 18)
+        duty = 2 + (angle / 16)
         self._pwm.ChangeDutyCycle(duty)
         self._last_angle = angle
 
-class LEDController:
-    def __init__(self, pin, freq):
-        GPIO.setup(pin, GPIO.OUT)
-        self._pwm = GPIO.PWM(pin, freq)
-        self._pwm.start(0)
-
-    def set_duty(self, duty):
-        duty = max(0, min(100, duty))
-        self._pwm.ChangeDutyCycle(duty)
-
-    def stop(self):
-        self._pwm.ChangeDutyCycle(0)
-
 # ----------------------------------------------------------------------------- 
 # SENSOR MANAGER (Threaded)
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------- 
 class SensorManager(threading.Thread):
-    def __init__(self, mux: rf_mux.I2C_Multiplexer):
+    def __init__(self, mux: TCA9548A):
         super().__init__(daemon=True)
         self._sensors = {}
         self._filters = {}
@@ -134,24 +145,32 @@ class SensorManager(threading.Thread):
         for name, ch in Config.SENSOR_CHANNELS.items():
             if name == 'TCS':
                 continue
-            mux.channel_enable(ch)
-            sens = adafruit_vl53l0x.VL53L0X(mux.i2c)
-            sens.measurement_timing_budget = (
-                Config.BUDGET_FRONT_US if name.startswith('F') else Config.BUDGET_REAR_US
-            )
-            sens.start_continuous()
-            self._sensors[name] = sens
-            self._filters[name] = RollingFilter(3)
-            self._latest[name] = 0
+            try:
+                self._mux.select_channel(ch)
+                time.sleep(0.02)
+                sens = adafruit_vl53l0x.VL53L0X(self._mux.i2c)
+                sens.measurement_timing_budget = (
+                    Config.BUDGET_FRONT_US if name.startswith('F') else Config.BUDGET_REAR_US
+                )
+                sens.start_continuous()
+                self._sensors[name] = sens
+                self._filters[name] = RollingFilter(3)
+                self._latest[name] = 0
+                logger.info("VL53L0X sensor %s initialized on channel %d", name, ch)
+            except Exception as e:
+                logger.error("Failed to init sensor %s on channel %d: %s", name, ch, e)
 
     def run(self):
         while self._running:
             for name, sensor in self._sensors.items():
-                mm = sensor.range
-                avg_mm = self._filters[name].add(mm)
-                with self._lock:
-                    self._latest[name] = avg_mm / 10.0
-            time.sleep(0.03)
+                try:
+                    mm = sensor.range
+                    avg_mm = self._filters[name].add(mm)
+                    with self._lock:
+                        self._latest[name] = avg_mm / 10.0
+                except Exception:
+                    pass
+            time.sleep(0.02)  # faster refresh than before
 
     def range_cm(self, name):
         with self._lock:
@@ -161,64 +180,95 @@ class SensorManager(threading.Thread):
         self._running = False
 
 # ----------------------------------------------------------------------------- 
-# HEARTBEAT THREAD
-# -----------------------------------------------------------------------------
-class HeartbeatThread(threading.Thread):
-    def __init__(self, button_led: LEDController, tcs_led: LEDController):
-        super().__init__(daemon=True)
+# LED ANIMATION (robot personality)
+# ----------------------------------------------------------------------------- 
+class LEDAnimation:
+    def __init__(self, button_led: PWMLED, tcs_led: PWMLED):
         self.button_led = button_led
         self.tcs_led = tcs_led
         self._running = True
+        self._thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
 
-    def run(self):
-        while self._running:
-            # Simple continuous pulse
-            for duty in [100, 30, 80, 20, 0]:
-                self.button_led.set_duty(duty)
-                time.sleep(0.1)
-            # TCS LED flicker
-            for duty in [40, 100, 30, 90]:
-                self.tcs_led.set_duty(duty)
-                time.sleep(0.12)
-            for duty in range(70, -1, -10):
-                self.tcs_led.set_duty(duty)
-                time.sleep(0.15)
+    def start(self):
+        self._running = True
+        self._thread.start()
 
     def stop(self):
         self._running = False
+        self.button_led.value = 0
+        self.tcs_led.value = 0
+
+    def _heartbeat_loop(self):
+        """Heartbeat = personality while waiting."""
+        while self._running:
+            for duty in [1.0, 0.3, 0.8, 0.2, 0.0]:
+                self.button_led.value = duty
+                time.sleep(0.15)
+
+    def wake_sequence(self):
+        """Wakes like opening eyes & blinking."""
+        for duty in np.linspace(0, 1, 20):
+            self.tcs_led.value = duty
+            time.sleep(0.04)
+        for _ in range(3):
+            self.tcs_led.value = 0
+            time.sleep(0.15)
+            self.tcs_led.value = 1
+            time.sleep(0.15)
+        time.sleep(1)
 
 # ----------------------------------------------------------------------------- 
-# ROBOT CLASS
-# -----------------------------------------------------------------------------
+# ROBOT
+# ----------------------------------------------------------------------------- 
 class Robot:
     def __init__(self):
         GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
 
+        GPIO.setup(Config.C_PIN, GPIO.OUT)
+        GPIO.setup(Config.NC_PIN, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+        GPIO.output(Config.C_PIN, GPIO.HIGH)
+
         self.motor      = MotorController(Config.IN1, Config.IN2, Config.ENA, Config.PWM_MOTOR_FREQ)
         self.servo      = ServoController(Config.SERVO_PIN, Config.PWM_SERVO_FREQ,
                                           min_deg=Config.STEER_MIN_DEG,
                                           max_deg=Config.STEER_MAX_DEG)
-        self.button_led = LEDController(Config.BUTTON_LED_PIN, Config.PWM_BUTTON_LED_FREQ)
-        self.tcs_led    = LEDController(Config.TCS_LED_PIN, Config.PWM_TCS_LED_FREQ)
+
+        # gpiozero LEDs + Button
+        self.button_led = PWMLED(Config.BUTTON_LED_PIN, frequency=100)
+        self.tcs_led    = PWMLED(Config.TCS_LED_PIN, frequency=100)
+        self.button     = Button(Config.BUTTON_PIN)
 
         i2c = busio.I2C(board.SCL, board.SDA)
-        global mux
-        mux = rf_mux.I2C_Multiplexer(i2c, address=0x70)
+        self.mux = TCA9548A(i2c)
 
-        self.sensors      = SensorManager(mux)
+        # Sensors
+        self.sensors = SensorManager(self.mux)
         self.sensors.start()
-        self.color_sensor = adafruit_tcs34725.TCS34725(mux.i2c)
+
+        # TCS color sensor
+        self.mux.select_channel(Config.SENSOR_CHANNELS['TCS'])
+        self.color_sensor = adafruit_tcs34725.TCS34725(i2c)
         self._color_filter = RollingFilter(3)
 
+        # Robot "state"
         self.orientation = None
         self.lap_count = 0
         self.color_seen = 0
 
-        self.heartbeat = HeartbeatThread(self.button_led, self.tcs_led)
-        self.heartbeat.start()
+        # Robot "personality" LED animation
+        self.led_anim = LEDAnimation(self.button_led, self.tcs_led)
+        self.led_anim.start()
+
+    def wait_for_button(self):
+        logger.info("Waiting for button press...")
+        self.button.wait_for_press()
+        logger.info("Button pressed! Running wake animation...")
+        self.led_anim.wake_sequence()
+        time.sleep(2)
 
     def detect_orientation(self):
+        """Decide CW/CCW by dominant color (personality moment)."""
         while self.orientation is None:
             r, g, b = self.color_sensor.color_rgb_bytes
             r_avg = self._color_filter.add(r)
@@ -238,7 +288,7 @@ class Robot:
         g_avg = self._color_filter.add(g)
         b_avg = self._color_filter.add(b)
         match = ((self.orientation == 'CCW' and b_avg > r_avg and b_avg > g_avg) or
-                 (self.orientation == 'CW'  and r_avg > g_avg and r_avg > b_avg))
+                 (self.orientation == 'CW' and r_avg > g_avg and r_avg > b_avg))
         self.color_seen = self.color_seen + 1 if match else 0
         if self.color_seen >= Config.COLOR_COUNT_FOR_LAP:
             self.lap_count += 1
@@ -247,28 +297,46 @@ class Robot:
 
     def main_loop(self):
         try:
+            self.wait_for_button()
             while self.orientation is None:
                 self.detect_orientation()
+
             while self.lap_count < Config.TOTAL_LAPS:
                 self.check_lap()
 
                 front = self.sensors.range_cm('F')
                 fl = self.sensors.range_cm('FL')
                 fr = self.sensors.range_cm('FR')
+                rl = self.sensors.range_cm('RL')
+                rr = self.sensors.range_cm('RR')
 
-                if front < Config.FRONT_THRESHOLD_CM:
-                    diff = fr - fl
-                    steer = 90 + diff
-                else:
-                    rl = self.sensors.range_cm('RL')
-                    rr = self.sensors.range_cm('RR')
-                    diff = rr - rl if self.orientation == 'CCW' else rl - rr
-                    steer = 90 + diff
+                # Steering logic (optimized but same behavior)
+                front_diff = fr - fl
+                rear_diff = rr - rl if self.orientation == 'CCW' else rl - rr
 
-                steer = max(Config.STEER_MIN_DEG, min(Config.STEER_MAX_DEG, steer))
+                side_correction = 0
+                if fl < Config.SIDE_THRESHOLD_CM or fr < Config.SIDE_THRESHOLD_CM:
+                    side_correction = (fr - fl) * 0.5
+                if rl < Config.SIDE_THRESHOLD_CM or rr < Config.SIDE_THRESHOLD_CM:
+                    side_correction += ((rr - rl) if self.orientation == 'CCW' else (rl - rr)) * 0.3
+
+                correction = (front_diff * 0.7 + rear_diff * 0.3) if front < Config.FRONT_THRESHOLD_CM \
+                             else (front_diff * 0.4 + rear_diff * 0.6)
+                correction += side_correction
+
+                steer = np.clip(90 + correction, Config.STEER_MIN_DEG, Config.STEER_MAX_DEG)
                 self.servo.set_angle(steer)
-                self.motor.forward(50)
-                time.sleep(0.03)
+
+                # Motor control
+                if front < 20:
+                    self.motor.stop()
+                elif front < Config.FRONT_THRESHOLD_CM:
+                    speed = max(10, (front / Config.FRONT_THRESHOLD_CM) * 35)
+                    self.motor.forward(speed)
+                else:
+                    self.motor.forward(35)
+
+                time.sleep(0.05)
 
         except Exception:
             logger.exception("Unhandled exception in main_loop")
@@ -278,15 +346,13 @@ class Robot:
     def shutdown(self):
         logger.info("Shutdown initiated.")
         self.motor.stop()
-        self.heartbeat.stop()
-        self.button_led.stop()
-        self.tcs_led.stop()
+        self.led_anim.stop()
         self.sensors.stop()
         GPIO.cleanup()
 
 # ----------------------------------------------------------------------------- 
 # MAIN
-# -----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------- 
 def main():
     robot = Robot()
     robot.main_loop()
