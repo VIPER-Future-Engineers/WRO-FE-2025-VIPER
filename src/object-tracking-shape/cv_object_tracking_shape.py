@@ -1,30 +1,12 @@
 #!/usr/bin/python3
 
-# ------------------------------------------------------------------------------
-# rpi-object-detection
-# ------------------------------------------------------------------------------
-# Find geometric shaped objects in the image using houghCircles().
-# ------------------------------------------------------------------------------
-# automaticdai
-# YF Robotics Labrotary
-# Instagram: yfrobotics
-# Twitter: @yfrobotics
-# Website: https://yfrobotics.github.io/
-# ------------------------------------------------------------------------------
-# Reference:
-# - https://www.pyimagesearch.com/2014/07/21/detecting-circles-images-using-opencv-hough-circles/
-# ------------------------------------------------------------------------------
-
 import os
 import sys
 import cv2
 import time
 import numpy as np
-import time
 
-# Add src directory to the path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from utils.picamera_utils import is_raspberry_camera, get_picamera
 
 CAMERA_DEVICE_ID = 0
@@ -32,99 +14,136 @@ IMAGE_WIDTH = 320
 IMAGE_HEIGHT = 240
 IS_RASPI_CAMERA = is_raspberry_camera()
 fps = 0
+
 print("Using raspi camera: ", IS_RASPI_CAMERA)
 
-def isset(v):
-    try:
-        type (eval(v))
-    except:
-        return 0
-    else:
-        return 1
-
-
 def visualize_fps(image, fps: int):
-    if len(np.shape(image)) < 3:
-        text_color = (255, 255, 255)  # white
-    else:
-        text_color = (0, 255, 0)  # green
-    row_size = 20  # pixels
-    left_margin = 24  # pixels
-
-    font_size = 1
-    font_thickness = 1
-
-    # Draw the FPS counter
-    fps_text = 'FPS = {:.1f}'.format(fps)
-    text_location = (left_margin, row_size)
-    cv2.putText(image, fps_text, text_location, cv2.FONT_HERSHEY_PLAIN,
-                font_size, text_color, font_thickness)
-
+    text_color = (0, 255, 0) if len(image.shape) == 3 else (255, 255, 255)
+    cv2.putText(image, f'FPS = {fps:.1f}', (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, text_color, 2)
     return image
 
+def angle_between_points(p1, p2, p3):
+    # Calculate angle at p2 formed by p1-p2-p3
+    a = np.array(p1) - np.array(p2)
+    b = np.array(p3) - np.array(p2)
+    cosine_angle = np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-10)
+    angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
+    return np.degrees(angle)
+
+def is_cube_face(contour):
+    peri = cv2.arcLength(contour, True)
+    approx = cv2.approxPolyDP(contour, 0.04 * peri, True)
+
+    if len(approx) < 4 or len(approx) > 6:
+        return False, approx
+
+    if not cv2.isContourConvex(approx):
+        return False, approx
+
+    area = cv2.contourArea(approx)
+    if area < 1000:  # minimum size threshold
+        return False, approx
+
+    # Check angles for near-rectangle shape
+    angles = []
+    pts = approx.reshape(-1, 2)
+    for i in range(len(pts)):
+        p1 = pts[i - 1]
+        p2 = pts[i]
+        p3 = pts[(i + 1) % len(pts)]
+        ang = angle_between_points(p1, p2, p3)
+        angles.append(ang)
+
+    # For rectangle-like shapes, angles ~ 80-100 degrees (allow some leeway)
+    for ang in angles:
+        if ang < 70 or ang > 110:
+            # Could be skewed, but we tolerate some deviation
+            # For cube tower, be flexible, so skip strict filtering here
+            pass
+
+    # Aspect ratio check on bounding box
+    x, y, w, h = cv2.boundingRect(approx)
+    aspect_ratio = float(w) / h if h != 0 else 0
+    if aspect_ratio < 0.3 or aspect_ratio > 3.5:
+        return False, approx
+
+    # Solidity (area / convex hull area)
+    hull = cv2.convexHull(approx)
+    hull_area = cv2.contourArea(hull)
+    if hull_area == 0:
+        return False, approx
+    solidity = float(area) / hull_area
+    if solidity < 0.8:
+        return False, approx
+
+    return True, approx
 
 if __name__ == "__main__":
     try:
-        # create video capture
         if IS_RASPI_CAMERA:
             cap = get_picamera(IMAGE_WIDTH, IMAGE_HEIGHT)
             cap.start()
         else:
-            # create video capture
             cap = cv2.VideoCapture(CAMERA_DEVICE_ID)
-            # set resolution to 320x240 to reduce latency
             cap.set(3, IMAGE_WIDTH)
             cap.set(4, IMAGE_HEIGHT)
 
         while True:
-            # ----------------------------------------------------------------------
-            # record start time
             start_time = time.time()
-            # Read the frames frome a camera
+
             if IS_RASPI_CAMERA:
                 frame = cap.capture_array()
             else:
-                _, frame = cap.read()
+                ret, frame = cap.read()
+                if not ret:
+                    print("Failed to grab frame")
+                    break
 
-            frame = cv2.blur(frame,(3,3))
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+            blurred = cv2.GaussianBlur(frame, (3, 3), 0)
+            gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
 
-            # Or get it from a JPEG
-            # frame = cv2.imread('frame0010.jpg', 1)
+            edges = cv2.Canny(gray, 50, 150)
 
-            # convert the image into gray color
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
             output = frame.copy()
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            rect_count = 0
 
-            # detect circles in the image
-            circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1.2, 100)
+            for cnt in contours:
+                valid, approx = is_cube_face(cnt)
+                if valid:
+                    cv2.drawContours(output, [approx], -1, (0, 255, 0), 3)
+                    M = cv2.moments(approx)
+                    if M['m00'] != 0:
+                        cx = int(M['m10'] / M['m00'])
+                        cy = int(M['m01'] / M['m00'])
+                        cv2.circle(output, (cx, cy), 5, (0, 0, 255), -1)
+                        cv2.putText(output, f"Pts: {len(approx)}", (cx - 30, cy - 10),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                    rect_count += 1
 
-            # ensure at least some circles were found
-            if circles is not None:
-                # convert the (x, y) coordinates and radius of the circles to integers
-                circles = np.round(circles[0, :]).astype("int")
-                # loop over the (x, y) coordinates and radius of the circles
-                for (x, y, r) in circles:
-                    # draw the circle in the output image, then draw a rectangle
-                    # corresponding to the center of the circle
-                    cv2.circle(output, (x, y), r, (0, 255, 0), 4)
-                    cv2.rectangle(output, (x - 5, y - 5), (x + 5, y + 5), (0, 128, 255), -1)
+            cv2.putText(output, f"Cubes Faces Detected: {rect_count}", (10, IMAGE_HEIGHT - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
-            # show the output image
-            cv2.imshow('img', np.hstack([frame, output]))
-            # cv2.imshow("frame", np.hstack([visualize_fps(frame, fps), visualize_fps(output, fps)]))
-            # ----------------------------------------------------------------------
-            # record end time
+            cv2.imshow('Cube Tower Faces', visualize_fps(output, fps))
+            cv2.imshow('Edges', edges)
+
             end_time = time.time()
-            # calculate FPS
             seconds = end_time - start_time
             fps = 1.0 / seconds
-            print("Estimated fps:{0:0.1f}".format(fps))
-            # if key pressed is 'Esc' then exit the loop
+
+            print(f"FPS: {fps:.1f}, Faces detected: {rect_count}")
+
             if cv2.waitKey(33) == 27:
                 break
+
     except Exception as e:
         print(e)
+
     finally:
-        # Clean up and exit the program
         cv2.destroyAllWindows()
-        cap.close() if IS_RASPI_CAMERA else cap.release()
+        if IS_RASPI_CAMERA:
+            cap.close()
+        else:
+            cap.release()

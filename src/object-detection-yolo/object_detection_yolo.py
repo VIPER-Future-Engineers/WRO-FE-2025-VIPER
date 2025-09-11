@@ -1,39 +1,27 @@
-# Use Ultralytics YOLO to detect objects in a video stream
+from picamera2 import Picamera2
 import cv2
 from ultralytics import YOLO
 
 def main():
-    # Load a YOLO11n PyTorch model
     model = YOLO("yolo11n.pt")
 
-    # Open default camera
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error: Could not open video stream.")
-        return
+    picam2 = Picamera2()
+    picam2_config = picam2.create_preview_configuration(main={"size": (640, 480)})
+    picam2.configure(picam2_config)
+    picam2.start()
 
     while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Error: Failed to grab frame.")
+        frame = picam2.capture_array()
+        if frame is None:
+            print("Failed to capture frame from picamera2.")
             break
 
-        # Run YOLO inference on the frame
         results = model(frame)
+        annotated = results[0].plot()
 
-        # Draw results on the frame
-        annotated_frame = results[0].plot()
-
-        # Show the frame
-        cv2.imshow("YOLOv11 Object Detection", annotated_frame)
-
-        # Exit on 'q' or ESC key
-        key = cv2.waitKey(1)
-        if key == 27 or key == ord('q'):
+        cv2.imshow("YOLOv11 Detection", annotated)
+        if cv2.waitKey(1) in (27, ord('q')):
             break
 
-    cap.release()
+    picam2.stop()
     cv2.destroyAllWindows()
-
-if __name__ == "__main__":
-    main()
