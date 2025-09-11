@@ -21,7 +21,7 @@ from gpiozero import PWMLED, Button
 # ----------------------------------------------------------------------------- 
 class Config:
     IN1            = 9
-    IN2            = 11S
+    IN2            = 11
     ENA            = 10
     SERVO_PIN      = 25
     BUTTON_PIN     = 23
