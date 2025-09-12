@@ -33,6 +33,7 @@ class Camera:
 
         detected_sections = []
 
+        # Convert to HSV for color detection
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         # --- Red detection ---
@@ -47,22 +48,23 @@ class Camera:
         upper_green = np.array([80, 255, 255])
         mask_green = cv2.inRange(hsv, lower_green, upper_green)
 
+        # List of masks with proper BGR color for rectangles
         color_masks = [("Red", mask_red, (0,0,255)), ("Green", mask_green, (0,255,0))]
 
-        # --- Draw grid borders (like original) ---
+        # --- Draw 3x2 grid borders ---
         for i in range(1, cols):
-            cv2.line(frame, (i * step_x, 0), (i * step_x, height), (0, 255, 0), 3)  # thicker border
+            cv2.line(frame, (i*step_x, 0), (i*step_x, height), (0,255,0), 3)
         for j in range(1, rows):
-            cv2.line(frame, (0, j * step_y), (width, j * step_y), (0, 255, 0), 3)
+            cv2.line(frame, (0, j*step_y), (width, j*step_y), (0,255,0), 3)
 
-        # --- Label sections + track objects ---
+        # --- Label sections and track detected objects ---
         section_id = 1
         for j in range(rows):
             for i in range(cols):
                 cx = i * step_x + step_x // 2
                 cy = j * step_y + step_y // 2
-                cv2.putText(frame, str(section_id), (cx - 15, cy),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                cv2.putText(frame, str(section_id), (cx-15, cy),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,0), 2)
 
                 for color_name, mask, box_color in color_masks:
                     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -70,15 +72,16 @@ class Camera:
                         x, y, w, h = cv2.boundingRect(cnt)
                         obj_cx = x + w // 2
                         obj_cy = y + h // 2
-                        distance_est = 1000 / (w + 1)
+                        distance_est = 1000 / (w + 1)  # original distance formula
 
-                        if (i * step_x <= obj_cx < (i + 1) * step_x and
-                            j * step_y <= obj_cy < (j + 1) * step_y):
+                        if (i*step_x <= obj_cx < (i+1)*step_x and
+                            j*step_y <= obj_cy < (j+1)*step_y):
                             detected_sections.append((section_id, color_name, distance_est))
-                            cv2.rectangle(frame, (x, y), (x + w, y + h), box_color, 2)
+                            cv2.rectangle(frame, (x,y), (x+w, y+h), box_color, 2)
                             cv2.putText(frame, f"{color_name} {int(distance_est)}cm",
-                                        (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                                        (x, y-10), cv2.FONT_HERSHEY_SIMPLEX,
                                         0.6, box_color, 2)
+
                 section_id += 1
 
         return frame, detected_sections
