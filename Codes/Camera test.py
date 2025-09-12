@@ -17,20 +17,17 @@ class Camera:
     def get_frame(self):
         frame = self.picam2.capture_array()
         if frame is None:
-            return np.zeros((720, 1280, 3), dtype=np.uint8)
-        # Flip because camera is mounted upside down
+            # fail-safe: black frame
+            frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        # Flip for upside-down mounting
         frame = cv2.rotate(frame, cv2.ROTATE_180)
         return frame
 
     def detect_blocks_sections(self):
-        """
-        Detect red and green blocks, overlay 2x6 grid,
-        return frame and list of detected sections with distances.
-        """
         frame = self.get_frame()
         height, width, _ = frame.shape
 
-        cols, rows = 6, 2  # 2x6 grid
+        cols, rows = 2, 3  # 2 columns, 3 rows
         step_x = width // cols
         step_y = height // rows
 
@@ -38,26 +35,25 @@ class Camera:
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # --- Red mask ---
+        # --- Red detection ---
         lower_red1 = np.array([0, 120, 70])
         upper_red1 = np.array([10, 255, 255])
         lower_red2 = np.array([170, 120, 70])
         upper_red2 = np.array([180, 255, 255])
         mask_red = cv2.inRange(hsv, lower_red1, upper_red1) | cv2.inRange(hsv, lower_red2, upper_red2)
 
-        # --- Green mask ---
+        # --- Green detection ---
         lower_green = np.array([40, 50, 50])
         upper_green = np.array([80, 255, 255])
         mask_green = cv2.inRange(hsv, lower_green, upper_green)
 
-        # Combine for detection loop
         color_masks = [("Red", mask_red, (0,0,255)), ("Green", mask_green, (0,255,0))]
 
-        # --- Draw 2x6 grid ---
+        # --- Draw grid borders (like original) ---
         for i in range(1, cols):
-            cv2.line(frame, (i * step_x, 0), (i * step_x, height), (0, 255, 0), 2)
+            cv2.line(frame, (i * step_x, 0), (i * step_x, height), (0, 255, 0), 3)  # thicker border
         for j in range(1, rows):
-            cv2.line(frame, (0, j * step_y), (width, j * step_y), (0, 255, 0), 2)
+            cv2.line(frame, (0, j * step_y), (width, j * step_y), (0, 255, 0), 3)
 
         # --- Label sections + track objects ---
         section_id = 1
@@ -66,9 +62,8 @@ class Camera:
                 cx = i * step_x + step_x // 2
                 cy = j * step_y + step_y // 2
                 cv2.putText(frame, str(section_id), (cx - 15, cy),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-                # Check each color
                 for color_name, mask, box_color in color_masks:
                     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                     for cnt in contours:
@@ -82,15 +77,14 @@ class Camera:
                             detected_sections.append((section_id, color_name, distance_est))
                             cv2.rectangle(frame, (x, y), (x + w, y + h), box_color, 2)
                             cv2.putText(frame, f"{color_name} {int(distance_est)}cm",
-                                        (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, box_color, 2)
-
+                                        (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.6, box_color, 2)
                 section_id += 1
 
         return frame, detected_sections
 
-
 def main():
-    print("Starting PiCamera2 detection (2x6 grid, upside-down camera). Press 'q' to exit.")
+    print("Starting PiCamera2 detection (3x2 grid, upside-down). Press 'q' to exit.")
     camera = Camera()
 
     while True:
@@ -103,7 +97,6 @@ def main():
             break
 
     cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()
