@@ -1,6 +1,6 @@
 # Team Viper – WRO 2025
 
-We’re ***Team Viper***, a first-year WRO team learning and building as we go. Our name comes from the Python code that powers our robot—and the viper snake, known for its precision and adaptability. We try to reflect that in our design: thoughtful, responsive and always improving. Our robot features a modular split chassis design, custom enclosure, and symbolic touches that make it feel personal. Each of us brings different strengths, from coding and mechanical layout to documentation and expressive feedback. We’re still figuring things out, but we’re proud of what we’ve built—and excited to learn more.
+We’re ***Team Viper***, a first-year WRO team learning and building as we go. Our name comes from the Python code that powers our robot, and the viper snake, known for its precision and adaptability. We try to reflect that in our design: thoughtful, responsive and always improving. Our robot features a modular split chassis design, custom enclosure, and symbolic touches that make it feel personal. Each of us brings different strengths, from coding and mechanical layout to documentation and expressive feedback. We’re still figuring things out, but we’re proud of what we’ve built—and excited to learn more.
 
 ---
 
