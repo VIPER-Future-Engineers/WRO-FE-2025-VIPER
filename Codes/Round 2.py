@@ -1,13 +1,17 @@
-#!/usr/bin/env python3
-import time, threading, collections, logging
+# Import Libraries
+import time
+import threading
+import collections
+import logging
 import numpy as np
-import sys
-import os
 import busio
 import board
+import sys
+import os
 import smbus2
 import cv2
 
+# GPIO fallback library import
 try:
     import RPi.GPIO as GPIO
 except Exception:
@@ -21,9 +25,8 @@ try:
 except Exception:
     PICAMERA_AVAILABLE = False
 
-# ----------------------------------------------------------------------------- 
-# CONFIGURATION
-# ----------------------------------------------------------------------------- 
+# GPIO ports
+
 class Config:
     IN1            = 9
     IN2            = 11
@@ -34,8 +37,9 @@ class Config:
     NC_PIN         = 24
     BUTTON_LED_PIN = 27
     TCS_LED_PIN    = 17
-    PWM_MOTOR_FREQ      = 1000
-    PWM_SERVO_FREQ      = 50
+    
+# Multiplexer ports
+    
     SENSOR_CHANNELS = {
         'FR': 1,
         'FL': 2,
@@ -44,6 +48,10 @@ class Config:
         'F':  5,
         'TCS': 0,
     }
+
+# Expectations 
+    PWM_MOTOR_FREQ      = 1000
+    PWM_SERVO_FREQ      = 50
     BUDGET_FRONT_US = 20000
     BUDGET_REAR_US  = 33000
     FRONT_THRESHOLD_CM = 40.0
@@ -53,15 +61,15 @@ class Config:
     COLOR_COUNT_FOR_LAP = 4
     TOTAL_LAPS = 3
 
-# ----------------------------------------------------------------------------- 
+ 
 # LOGGING
-# ----------------------------------------------------------------------------- 
+ 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# ----------------------------------------------------------------------------- 
-# TCA9548A MULTIPLEXER (primary) + SMBus fallback
-# ----------------------------------------------------------------------------- 
+
+# TCA9548A MULTIPLEXER (primary) + SMBus2 (secondary) + SMBus (tertiary)
+ 
 class TCA9548A:
     def __init__(self, i2c, address=0x70):
         self.i2c = i2c
@@ -69,14 +77,14 @@ class TCA9548A:
         self.disable_all()
 
     def select_channel(self, channel: int):
-        if 0 <= channel <= 7:
+        if 0 <= channel <= 5:
             try:
                 self.i2c.writeto(self.address, bytes([1 << channel]))
             except Exception:
                 bus = smbus2.SMBus(1)
                 bus.write_byte(self.address, 1 << channel)
         else:
-            raise ValueError("Channel must be 0–7")
+            raise ValueError("Channel must be 0–5")
 
     def disable_all(self):
         try:
@@ -85,9 +93,9 @@ class TCA9548A:
             bus = smbus2.SMBus(1)
             bus.write_byte(self.address, 0x00)
 
-# ----------------------------------------------------------------------------- 
-# HELPERS
-# ----------------------------------------------------------------------------- 
+
+# Reading clearings
+ 
 class RollingFilter:
     def __init__(self, size=3):
         self._buf = collections.deque(maxlen=size)
@@ -155,9 +163,9 @@ class LEDAnimation:
                 time.sleep(0.1)
             time.sleep(0.3)
 
-# ----------------------------------------------------------------------------- 
+
 # SENSOR MANAGER
-# ----------------------------------------------------------------------------- 
+
 class SensorManager(threading.Thread):
     def __init__(self, mux):
         super().__init__(daemon=True)
@@ -202,9 +210,9 @@ class SensorManager(threading.Thread):
     def stop(self):
         self._running = False
 
-# ----------------------------------------------------------------------------- 
+
 # CameraSensor with section split block detection
-# ----------------------------------------------------------------------------- 
+
 class CameraSensor:
     def __init__(self, resolution=(320,240), framerate=20):
         self.cv2 = cv2
@@ -252,7 +260,7 @@ class CameraSensor:
 
         height, width, _ = frame.shape
 
-        # Split camera image into 6 sections: left/right, top/middle/bottom
+# Split camera image into 6 sections: left/right, top/middle/bottom
         sections = {
             'left_top': frame[:height // 3, :width // 2],
             'left_middle': frame[height // 3: 2 * height // 3, :width // 2],
@@ -272,9 +280,9 @@ class CameraSensor:
 
         return detected
 
-# ----------------------------------------------------------------------------- 
+ 
 # ROBOT CLASS
-# ----------------------------------------------------------------------------- 
+ 
 class Robot:
     def __init__(self):
         GPIO.setwarnings(False)
@@ -299,7 +307,7 @@ class Robot:
         logger.info("Button pressed")
 
     def determine_approach_side(self):
-        # Placeholder approach side determination example based on front sensor distance
+# Placeholder approach side determination example based on front sensor distance
         front_distance = self.sensors.range_cm('F')
         return 'left' if front_distance > 20 else 'right'
 
@@ -308,21 +316,21 @@ class Robot:
         This is a stub example. Replace this logic with matching your actual
         layouts and mapping to directions depending on the approach_side.
         """
-        # Debug logging block counts for each section
+# Debug logging block counts for each section
         for sec in detected_sections:
             green_ct = len(detected_sections[sec]['green'])
             red_ct = len(detected_sections[sec]['red'])
             logger.info(f"{sec}: Green blocks={green_ct}, Red blocks={red_ct}")
 
-        # Example: decision map for demonstration
+# Decision map:
         if approach_side == 'left':
-            # Sample rule: If any green block detected in left_middle, go forward else turn right
+# If any green block detected in left_middle, go forward else turn right
             if len(detected_sections.get('left_middle', {}).get('green', [])) > 0:
                 return 'forward'
             else:
                 return 'turn_right'
         else:
-            # if any red block detected in right_middle, go forward else turn left
+# If any red block detected in right_middle, go forward else turn left
             if len(detected_sections.get('right_middle', {}).get('red', [])) > 0:
                 return 'forward'
             else:
@@ -365,9 +373,9 @@ class Robot:
         if self.camera.picamera:
             self.camera.picamera.close()
 
-# ----------------------------------------------------------------------------- 
-# MAIN
-# ----------------------------------------------------------------------------- 
+ 
+# Run Code
+
 def main():
     robot = Robot()
     robot.main_loop()
