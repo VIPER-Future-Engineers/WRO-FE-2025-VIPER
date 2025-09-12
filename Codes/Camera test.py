@@ -18,8 +18,8 @@ class Camera:
         frame = self.picam2.capture_array()
         if frame is None:
             frame = np.zeros((360,640,3), dtype=np.uint8)
-        # Convert RGB → BGR
-        cv2.cvtColor(frame, cv2.COLOR_RGB2BGR, dst=frame)  # in-place to save time
+        # Convert RGB → BGR for OpenCV
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         # Flip upside down
         frame = cv2.rotate(frame, cv2.ROTATE_180)
         return frame
@@ -28,7 +28,7 @@ class Camera:
         frame = self.get_frame()
         height, width, _ = frame.shape
 
-        cols, rows = 2, 3  # 2x3 grid
+        cols, rows = 2, 3  # 2 columns, 3 rows
         step_x = width // cols
         step_y = height // rows
 
@@ -36,27 +36,30 @@ class Camera:
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # Original HSV thresholds
-        lower_red1 = np.array([0,100,100])
-        upper_red1 = np.array([10,255,255])
-        lower_red2 = np.array([160,100,100])
-        upper_red2 = np.array([180,255,255])
+        # --- LESS SENSITIVE HSV THRESHOLDS ---
+        # Red
+        lower_red1 = np.array([0, 80, 80])
+        upper_red1 = np.array([10, 200, 200])
+        lower_red2 = np.array([160, 80, 80])
+        upper_red2 = np.array([180, 200, 200])
         mask_red = cv2.inRange(hsv, lower_red1, upper_red1) | cv2.inRange(hsv, lower_red2, upper_red2)
 
-        lower_green = np.array([40,50,50])
-        upper_green = np.array([80,255,255])
+        # Green
+        lower_green = np.array([45, 60, 60])
+        upper_green = np.array([75, 200, 200])
         mask_green = cv2.inRange(hsv, lower_green, upper_green)
 
         color_masks = [("Red", mask_red, (0,0,255)), ("Green", mask_green, (0,255,0))]
 
-        # Draw grid borders
+        # Draw grid
         for i in range(1, cols):
             cv2.line(frame, (i*step_x,0), (i*step_x,height), (0,255,0), 2)
         for j in range(1, rows):
             cv2.line(frame, (0,j*step_y), (width,j*step_y), (0,255,0), 2)
 
-        # Label sections + detect objects
+        # Track objects and label sections
         section_id = 1
+        total_blocks = 0
         for j in range(rows):
             for i in range(cols):
                 cx = i*step_x + step_x//2
@@ -75,17 +78,21 @@ class Camera:
                         if (i*step_x <= obj_cx < (i+1)*step_x and
                             j*step_y <= obj_cy < (j+1)*step_y):
                             detected_sections.append((section_id, color_name, distance_est))
+                            total_blocks += 1
                             cv2.rectangle(frame, (x,y), (x+w,y+h), box_color, 2)
                             cv2.putText(frame, f"{color_name} {int(distance_est)}cm",
                                         (x, y-10), cv2.FONT_HERSHEY_SIMPLEX,
                                         0.5, box_color, 1)
-
                 section_id += 1
+
+        # Display total detected blocks on frame
+        cv2.putText(frame, f"Total blocks: {total_blocks}", (10,30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0,255,255), 2)
 
         return frame, detected_sections
 
 def main():
-    print("PiCamera2 detection (3x2 grid, original HSV, faster). Press 'q' to exit.")
+    print("Starting PiCamera2 detection (3x2 grid, less sensitive). Press 'q' to exit.")
     camera = Camera()
 
     while True:
