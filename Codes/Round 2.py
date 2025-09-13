@@ -19,7 +19,7 @@ except Exception:
     import RPi.GPIO as GPIO  # fallback for PWM
 
 
-try:
+try: 
     from picamera2 import Picamera2
     PICAMERA_AVAILABLE = True
 except Exception:
@@ -224,6 +224,7 @@ class CameraSensor:
             self.picamera = Picamera2()
             cfg = self.picamera.create_preview_configuration(
                 main={"format":"XRGB8888","size":resolution}
+                
             )
             self.picamera.configure(cfg)
             self.picamera.start()
